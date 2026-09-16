@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>POS Pemancingan Keboendali</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <!-- html2pdf.js CDN (Pencetakan Struk PDF) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+  <style>
+    /* Custom Scrollbar & Safe Area padding for Mobile */
+    body {
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .pb-safe {
+      padding-bottom: 5rem;
+    }
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 font-sans text-slate-800 antialiased">
+
+<div id="app" class="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col justify-between shadow-2xl relative">
+
+  <!-- ================= TOP HEADER ================= -->
+  <header class="bg-emerald-700 text-white p-4 sticky top-0 z-30 shadow-md">
+    <div class="flex justify-between items-center">
+      <div>
+        <h1 class="font-bold text-lg tracking-wide flex items-center gap-2">
+          <i class="fa-solid font-bold fa-fish-fins text-emerald-300"></i> Keboendali POS
+        </h1>
+        <p class="text-xs text-emerald-100 flex items-center gap-1">
+          <i class="fa-solid fa-user-gear"></i> Kasir: 
+          <span class="font-semibold underline cursor-pointer" @click="switchKasirModal = true">{{ currentKasir }}</span>
+        </p>
+      </div>
+      <button @click="switchKasirModal = true" class="bg-emerald-800 hover:bg-emerald-900 text-xs py-1.5 px-3 rounded-lg border border-emerald-600 shadow-sm flex items-center gap-1.5">
+        <i class="fa-solid fa-right-from-bracket"></i> Shift
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= MAIN CONTENT CONTAINER ================= -->
+  <main class="flex-1 p-4 pb-safe overflow-y-auto">
+
+    <!-- 1. TAB KASIR / POS -->
+    <div v-if="activeTab === 'kasir'" class="space-y-4">
+      
+      <!-- Pilih Member (Optional) -->
+      <div class="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200">
+        <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase">Pelanggan / Member</label>
+        <div class="flex gap-2">
+          <select v-model="cart.memberId" class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <option :value="null">-- Non-Member (Umum) --</option>
+            <option v-for="m in members" :key="m.id" :value="m.id">
+              {{ m.nama }} (Saldo: Rp {{ formatNumber(m.saldo) }})
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Quick Timbang Ikan -->
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <h3 class="font-bold text-slate-700 text-sm mb-3 flex items-center gap-2">
+          <i class="fa-solid fa-weight-scale text-emerald-600"></i> Timbang Ikan Hasil Pancing
+        </h3>
+        <div class="grid grid-cols-2 gap-2 mb-3">
+          <div v-for="ikan in daftarIkan" :key="ikan.id" 
+               @click="selectIkan(ikan)"
+               :class="['p-2.5 rounded-xl border text-left cursor-pointer transition-all', selectedIkan?.id === ikan.id ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-400' : 'border-slate-200 hover:bg-slate-50']">
+            <div class="font-bold text-slate-800 text-sm">{{ ikan.nama }}</div>
+            <div class="text-xs text-emerald-600 font-semibold">Rp {{ formatNumber(ikan.harga) }}/kg</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">Stok: {{ ikan.stokKg }} Kg</div>
+          </div>
+        </div>
+
+        <div v-if="selectedIkan" class="bg-emerald-50/60 p-3 rounded-xl border border-emerald-200 space-y-2">
+          <div class="flex justify-between items-center text-xs font-semibold text-emerald-900">
+            <span>Input Berat ({{ selectedIkan.nama }})</span>
+            <span>Rp {{ formatNumber(selectedIkan.harga * (inputBerat || 0)) }}</span>
+          </div>
+          <div class="flex gap-2">
+            <input type="number" step="0.1" v-model.number="inputBerat" placeholder="Berat (Kg), ex: 1.5" class="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <button @click="addIkanToCart" class="bg-emerald-600 text-white font-semibold text-xs px-4 rounded-lg hover:bg-emerald-700 active:scale-95 transition-transform">
+              + Tambah
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Item Tambahan (Umpan, Sewa, F&B, Jasa) -->
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <div class="flex gap-2 overflow-x-auto pb-2 mb-3 text-xs font-semibold">
+          <button v-for="cat in categories" :key="cat" @click="selectedCategory = cat" 
+                  :class="['px-3 py-1.5 rounded-full whitespace-nowrap transition-colors', selectedCategory === cat ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600']">
+            {{ cat }}
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+          <div v-for="item in filteredItems" :key="item.id" @click="addToCart(item)"
+               class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 active:scale-95 transition-transform cursor-pointer flex flex-col justify-between">
+            <div>
+              <div class="font-semibold text-xs text-slate-800">{{ item.nama }}</div>
+              <div class="text-[11px] text-slate-500">Rp {{ formatNumber(item.harga) }}</div>
+            </div>
+            <div class="text-[10px] text-emerald-600 mt-1 font-medium">+ Tambah</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Keranjang / Cart Summary -->
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <h3 class="font-bold text-slate-700 text-sm mb-2 flex justify-between items-center">
+          <span><i class="fa-solid fa-cart-shopping text-emerald-600"></i> Ringkasan Pesanan</span>
+          <span class="text-xs text-slate-400 font-normal">{{ cart.items.length }} Item</span>
+        </h3>
+
+        <div v-if="cart.items.length === 0" class="text-center py-6 text-slate-400 text-xs">
+          Keranjang belanjaan masih kosong.
+        </div>
+
+        <div v-else class="divide-y divide-slate-100 max-h-48 overflow-y-auto">
+          <div v-for="(item, idx) in cart.items" :key="idx" class="py-2 flex justify-between items-center text-xs">
+            <div class="flex-1 pr-2">
+              <div class="font-semibold text-slate-700">{{ item.nama }}</div>
+              <div class="text-slate-400">{{ item.qty }} x Rp {{ formatNumber(item.harga) }}</div>
+            </div>
+            <div class="font-bold text-slate-800 mr-3">Rp {{ formatNumber(item.qty * item.harga) }}</div>
+            <button @click="removeFromCart(idx)" class="text-rose-500 hover:text-rose-700">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Total Breakdown -->
+        <div class="mt-4 pt-3 border-t border-slate-200 space-y-1.5">
+          <div class="flex justify-between text-xs text-slate-500">
+            <span>Subtotal</span>
+            <span>Rp {{ formatNumber(cartTotal) }}</span>
+          </div>
+          <div class="flex justify-between text-base font-bold text-slate-800 pt-1 border-t border-dashed">
+            <span>Total Bayar</span>
+            <span class="text-emerald-600">Rp {{ formatNumber(cartTotal) }}</span>
+          </div>
+        </div>
+
+        <button @click="openCheckoutModal" :disabled="cart.items.length === 0" 
+                class="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold py-3 rounded-xl shadow-lg shadow-emerald-600/20 active:scale-95 transition-all text-sm flex justify-center items-center gap-2">
+          <i class="fa-solid fa-money-bill-wave"></i> Lanjut Pembayaran
+        </button>
+      </div>
+
+    </div>
+
+    <!-- 2. TAB MEMBER & DEPOSIT -->
+    <div v-if="activeTab === 'member'" class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h2 class="font-bold text-slate-800 text-base">Kelola Member & Deposit</h2>
+        <button @click="showAddMemberModal = true" class="bg-emerald-600 text-white text-xs px-3 py-2 rounded-xl font-semibold hover:bg-emerald-700 flex items-center gap-1">
+          <i class="fa-solid fa-user-plus"></i> Member Baru
+        </button>
+      </div>
+
+      <!-- Search Member -->
+      <div class="relative">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-xs"></i>
+        <input type="text" v-model="searchMemberQuery" placeholder="Cari Nama / ID Member..." class="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500">
+      </div>
+
+      <!-- Daftar Member -->
+      <div class="space-y-3">
+        <div v-for="m in filteredMembers" :key="m.id" class="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex justify-between items-center">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="font-bold text-sm text-slate-800">{{ m.nama }}</span>
+              <span class="bg-slate-100 text-slate-600 text-[10px] font-mono px-2 py-0.5 rounded border border-slate-200">{{ m.id }}</span>
+            </div>
+            <div class="text-xs text-slate-500 mt-1">HP: {{ m.hp }}</div>
+            <div class="text-xs font-bold text-emerald-600 mt-0.5">Saldo: Rp {{ formatNumber(m.saldo) }}</div>
+          </div>
+          <button @click="openTopUpModal(m)" class="bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1">
+            <i class="fa-solid fa-wallet"></i> Top Up
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. TAB STOK KOLAM -->
+    <div v-if="activeTab === 'stok'" class="space-y-4">
+      <div class="flex justify-between items-center">
+        <div>
+          <h2 class="font-bold text-slate-800 text-base">Monitoring Stok Kolam</h2>
+          <p class="text-xs text-slate-500">Estimasi total ikan dalam kolam (Kg)</p>
+        </div>
+        <button @click="showRestockModal = true" class="bg-emerald-600 text-white text-xs px-3 py-2 rounded-xl font-semibold hover:bg-emerald-700 flex items-center gap-1">
+          <i class="fa-solid fa-truck-field"></i> Restock Kolam
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div v-for="ikan in daftarIkan" :key="ikan.id" class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+          <div class="flex justify-between items-start mb-2">
+            <span class="font-bold text-slate-800 text-sm">{{ ikan.nama }}</span>
+            <span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">{{ ikan.stokKg }} Kg</span>
+          </div>
+          <div class="text-xs text-slate-500 mb-3">Harga: Rp {{ formatNumber(ikan.harga) }}/kg</div>
+          <button @click="editHargaIkan(ikan)" class="w-full text-center bg-slate-50 hover:bg-slate-100 border border-slate-200 py-1 rounded-lg text-xs text-slate-600 font-semibold">
+            Edit Harga
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. TAB LAPORAN & OWNER -->
+    <div v-if="activeTab === 'laporan'" class="space-y-4">
+      <h2 class="font-bold text-slate-800 text-base">Dashboard Laporan Owner</h2>
+
+      <!-- Card Summary Omzet -->
+      <div class="bg-gradient-to-br from-emerald-600 to-teal-700 text-white p-4 rounded-2xl shadow-lg">
+        <div class="text-xs text-emerald-100 font-medium">Total Omzet Hari Ini</div>
+        <div class="text-2xl font-extrabold mt-1">Rp {{ formatNumber(totalOmzetHariIni) }}</div>
+        <div class="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-emerald-500/50 text-center text-xs">
+          <div>
+            <div class="text-emerald-200 text-[10px]">CASH</div>
+            <div class="font-bold">Rp {{ formatNumber(omzetByMethod.cash) }}</div>
+          </div>
+          <div>
+            <div class="text-emerald-200 text-[10px]">DEPOSIT</div>
+            <div class="font-bold">Rp {{ formatNumber(omzetByMethod.deposit) }}</div>
+          </div>
+          <div>
+            <div class="text-emerald-200 text-[10px]">QRIS</div>
+            <div class="font-bold">Rp {{ formatNumber(omzetByMethod.qris) }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Omzet Per Kasir -->
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <h3 class="font-bold text-slate-700 text-xs uppercase mb-3">Breakdown Omzet Per Kasir</h3>
+        <div class="space-y-2">
+          <div v-for="(total, kasirNama) in omzetPerKasir" :key="kasirNama" class="flex justify-between items-center text-xs border-b border-slate-100 pb-2">
+            <span class="font-medium text-slate-700"><i class="fa-solid fa-user-tag text-slate-400 mr-1"></i> {{ kasirNama }}</span>
+            <span class="font-bold text-emerald-600">Rp {{ formatNumber(total) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Riwayat Transaksi -->
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <h3 class="font-bold text-slate-700 text-xs uppercase mb-3">Riwayat Transaksi Terbaru</h3>
+        <div class="space-y-3 max-h-60 overflow-y-auto pr-1">
+          <div v-for="trx in riwayatTransaksi" :key="trx.id" class="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+            <div class="flex justify-between font-bold text-slate-800">
+              <span>{{ trx.id }}</span>
+              <span class="text-emerald-600">Rp {{ formatNumber(trx.total) }}</span>
+            </div>
+            <div class="flex justify-between text-slate-400 text-[10px]">
+              <span>{{ trx.waktu }} | {{ trx.kasir }}</span>
+              <span class="uppercase font-semibold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">{{ trx.metode }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ================= BOTTOM NAVIGATION BAR ================= -->
+  <nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-200 grid grid-cols-4 z-30 shadow-lg">
+    <button @click="activeTab = 'kasir'" :class="['py-2.5 flex flex-col items-center gap-1', activeTab === 'kasir' ? 'text-emerald-600 font-bold' : 'text-slate-400']">
+      <i class="fa-solid fa-cash-register text-lg"></i>
+      <span class="text-[10px]">Kasir</span>
+    </button>
+    <button @click="activeTab = 'member'" :class="['py-2.5 flex flex-col items-center gap-1', activeTab === 'member' ? 'text-emerald-600 font-bold' : 'text-slate-400']">
+      <i class="fa-solid fa-users text-lg"></i>
+      <span class="text-[10px]">Member</span>
+    </button>
+    <button @click="activeTab = 'stok'" :class="['py-2.5 flex flex-col items-center gap-1', activeTab === 'stok' ? 'text-emerald-600 font-bold' : 'text-slate-400']">
+      <i class="fa-solid fa-water text-lg"></i>
+      <span class="text-[10px]">Stok Kolam</span>
+    </button>
+    <button @click="activeTab = 'laporan'" :class="['py-2.5 flex flex-col items-center gap-1', activeTab === 'laporan' ? 'text-emerald-600 font-bold' : 'text-slate-400']">
+      <i class="fa-solid fa-chart-line text-lg"></i>
+      <span class="text-[10px]">Laporan</span>
+    </button>
+  </nav>
+
+  <!-- ================= MODAL CHECKOUT & PEMBAYARAN ================= -->
+  <div v-if="showCheckoutModal" class="fixed inset-0 bg-black/60 z-50 flex items-end justify-center sm:items-center p-0 sm:p-4">
+    <div class="bg-white w-full max-w-md rounded-t-3xl sm:rounded-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto animate-slide-up">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h3 class="font-bold text-slate-800 text-base">Pembayaran</h3>
+        <button @click="showCheckoutModal = false" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div class="text-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+        <div class="text-xs text-slate-400">Total Pembayaran</div>
+        <div class="text-2xl font-black text-emerald-600">Rp {{ formatNumber(cartTotal) }}</div>
+      </div>
+
+      <!-- Pilih Metode Pembayaran -->
+      <div class="space-y-2">
+        <label class="block text-xs font-bold text-slate-500 uppercase">Metode Pembayaran</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button @click="checkoutMetode = 'CASH'" :class="['py-2.5 rounded-xl border font-bold text-xs flex flex-col items-center gap-1', checkoutMetode === 'CASH' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600']">
+            <i class="fa-solid fa-money-bill"></i> Cash
+          </button>
+          <button @click="checkoutMetode = 'DEPOSIT'" :class="['py-2.5 rounded-xl border font-bold text-xs flex flex-col items-center gap-1', checkoutMetode === 'DEPOSIT' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600']">
+            <i class="fa-solid fa-wallet"></i> Deposit
+          </button>
+          <button @click="checkoutMetode = 'QRIS'" :class="['py-2.5 rounded-xl border font-bold text-xs flex flex-col items-center gap-1', checkoutMetode === 'QRIS' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600']">
+            <i class="fa-solid fa-qrcode"></i> QRIS
+          </button>
+        </div>
+      </div>
+
+      <!-- Visual QRIS -->
+      <div v-if="checkoutMetode === 'QRIS'" class="text-center p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+        <div class="text-xs text-slate-500 font-semibold">Scan QRIS Pemancingan Keboendali</div>
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=KEBOENDALI_PAY" class="w-36 h-36 mx-auto border p-2 bg-white rounded-lg shadow-sm" alt="QRIS Code">
+        <div class="text-[10px] text-slate-400">Verifikasi otomatis setelah pelanggan transfer.</div>
+      </div>
+
+      <!-- Info Deposit -->
+      <div v-if="checkoutMetode === 'DEPOSIT'" class="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs">
+        <template v-if="selectedMember">
+          <div class="flex justify-between font-semibold text-amber-900">
+            <span>Saldo Member:</span>
+            <span>Rp {{ formatNumber(selectedMember.saldo) }}</span>
+          </div>
+          <div v-if="selectedMember.saldo < cartTotal" class="text-rose-600 font-bold mt-1">
+            ⚠️ Saldo deposit tidak mencukupi! Silahkan Top-Up terlebih dahulu.
+          </div>
+        </template>
+        <template v-else>
+          <div class="text-rose-600 font-bold">⚠️ Harap pilih Member terlebih dahulu pada menu utama!</div>
+        </template>
+      </div>
+
+      <button @click="prosesSelesaiTransaksi" :disabled="checkoutMetode === 'DEPOSIT' && (!selectedMember || selectedMember.saldo < cartTotal)"
+              class="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold py-3 rounded-xl shadow-lg shadow-emerald-600/20 active:scale-95 transition-all text-sm">
+        Selesaikan Transaksi
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= MODAL STRUK DIGITAL ================= -->
+  <div v-if="lastTrx" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-bold text-slate-800 text-sm">Struk Transaksi</h3>
+        <button @click="lastTrx = null" class="text-slate-400"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <!-- Printable Area -->
+      <div id="printable-receipt" class="bg-slate-50 p-4 rounded-xl border border-slate-200 font-mono text-xs space-y-3">
+        <div class="text-center">
+          <div class="font-bold text-sm text-slate-800">PEMANCINGAN KEBOENDALI</div>
+          <div class="text-[10px] text-slate-500">Jl. Raya Keboendali No. 88</div>
+          <div class="text-[10px] text-slate-400 mt-1">-------------------------------- flex</div>
+        </div>
+
+        <div class="space-y-1 text-[11px]">
+          <div>ID: {{ lastTrx.id }}</div>
+          <div>Tgl: {{ lastTrx.waktu }}</div>
+          <div>Kasir: {{ lastTrx.kasir }}</div>
+          <div>Pelanggan: {{ lastTrx.memberNama }}</div>
+          <div>Metode: {{ lastTrx.metode }}</div>
+        </div>
+
+        <div class="border-t border-dashed border-slate-300 pt-2 space-y-1.5">
+          <div v-for="item in lastTrx.items" :key="item.nama" class="flex justify-between">
+            <span>{{ item.nama }} (x{{ item.qty }})</span>
+            <span>{{ formatNumber(item.qty * item.harga) }}</span>
+          </div>
+        </div>
+
+        <div class="border-t border-dashed border-slate-300 pt-2 flex justify-between font-bold text-sm">
+          <span>TOTAL</span>
+          <span>Rp {{ formatNumber(lastTrx.total) }}</span>
+        </div>
+
+        <div class="text-center text-[10px] text-slate-400 pt-2">
+          Terima kasih atas kunjungan Anda!<br>Selamat Menikmati & Salam Strike!
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <button @click="downloadStrukPDF" class="bg-slate-800 text-white font-semibold py-2 rounded-xl text-xs flex justify-center items-center gap-1.5">
+          <i class="fa-solid fa-file-pdf"></i> Simpan PDF
+        </button>
+        <button @click="shareWhatsApp" class="bg-emerald-600 text-white font-semibold py-2 rounded-xl text-xs flex justify-center items-center gap-1.5">
+          <i class="fa-brands fa-whatsapp text-sm"></i> Kirim WA
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL TOP UP DEPOSIT ================= -->
+  <div v-if="showTopUpModal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-5 space-y-4">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-bold text-slate-800 text-sm">Top-Up Deposit</h3>
+        <button @click="showTopUpModal = false" class="text-slate-400"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div class="text-xs text-slate-600">
+        Member: <span class="font-bold text-slate-800">{{ selectedTopUpMember?.nama }}</span>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Nominal Top-Up (Rp)</label>
+        <input type="number" v-model.number="inputNominalTopUp" placeholder="0" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500">
+      </div>
+
+      <button @click="simpanTopUp" class="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs hover:bg-emerald-700">
+        Konfirmasi Top-Up
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= MODAL TAMBAH MEMBER ================= -->
+  <div v-if="showAddMemberModal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-5 space-y-3">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-bold text-slate-800 text-sm">Tambah Member Baru</h3>
+        <button @click="showAddMemberModal = false" class="text-slate-400"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Nama Lengkap</label>
+        <input type="text" v-model="newMember.nama" placeholder="Contoh: Budi Santoso" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Nomor WhatsApp / HP</label>
+        <input type="text" v-model="newMember.hp" placeholder="08123456789" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Deposit Awal (Optional)</label>
+        <input type="number" v-model.number="newMember.saldo" placeholder="0" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500">
+      </div>
+
+      <button @click="simpanMemberBaru" class="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs hover:bg-emerald-700 mt-2">
+        Simpan Member
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= MODAL RESTOCK KOLAM ================= -->
+  <div v-if="showRestockModal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-5 space-y-3">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-bold text-slate-800 text-sm">Restock Ikan Kolam</h3>
+        <button @click="showRestockModal = false" class="text-slate-400"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Pilih Jenis Ikan</label>
+        <select v-model="restockData.ikanId" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500">
+          <option v-for="ikan in daftarIkan" :key="ikan.id" :value="ikan.id">{{ ikan.nama }}</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1">Tambahan Berat (Kg)</label>
+        <input type="number" step="0.1" v-model.number="restockData.jumlahKg" placeholder="Contoh: 25.5" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500">
+      </div>
+
+      <button @click="simpanRestock" class="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-xl text-xs hover:bg-emerald-700 mt-2">
+        Tambah Stok Kolam
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= MODAL SWITCH KASIR ================= -->
+  <div v-if="switchKasirModal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-sm rounded-2xl p-5 space-y-3">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-bold text-slate-800 text-sm">Ganti Kasir Bertugas</h3>
+        <button @click="switchKasirModal = false" class="text-slate-400"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div class="space-y-2">
+        <button v-for="k in daftarKasir" :key="k" @click="currentKasir = k; switchKasirModal = false"
+                :class="['w-full p-2.5 rounded-xl border text-left font-bold text-xs flex justify-between items-center', currentKasir === k ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600']">
+          <span><i class="fa-solid fa-user mr-2"></i> {{ k }}</span>
+          <i v-if="currentKasir === k" class="fa-solid fa-check"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Vue 3 Application Script -->
+<script>
+  const { createApp } = Vue;
+
+  createApp({
+    data() {
+      return {
+        activeTab: 'kasir',
+        currentKasir: 'Kasir 1',
+        daftarKasir: ['Kasir 1', 'Kasir 2', 'Owner / Admin'],
+        switchKasirModal: false,
+
+        // Data Master Ikan (Default Storage)
+        daftarIkan: JSON.parse(localStorage.getItem('kb_ikan')) || [
+          { id: 'ik-1', nama: 'Ikan Nila', harga: 55000, stokKg: 120 },
+          { id: 'ik-2', nama: 'Ikan Mas', harga: 60000, stokKg: 85 },
+          { id: 'ik-3', nama: 'Ikan Sepat', harga: 55000, stokKg: 40 },
+          { id: 'ik-4', nama: 'Ikan Gurame', harga: 90000, stokKg: 65 }
+        ],
+
+        selectedIkan: null,
+        inputBerat: null,
+
+        // Data Master Item Tambahan POS
+        categories: ['Umpan', 'Sewa', 'Jasa', 'F&B'],
+        selectedCategory: 'Umpan',
+        posItems: [
+          { id: 'p-1', nama: 'Umpan Pelet Spesial', harga: 10000, kategori: 'Umpan' },
+          { id: 'p-2', nama: 'Umpan Cacing Porsi', harga: 5000, kategori: 'Umpan' },
+          { id: 'p-3', nama: 'Sewa Joran Carbon', harga: 20000, kategori: 'Sewa' },
+          { id: 'p-4', nama: 'Sewa Reel standar', harga: 15000, kategori: 'Sewa' },
+          { id: 'p-5', nama: 'Jasa Bersih Ikan /kg', harga: 5000, kategori: 'Jasa' },
+          { id: 'p-6', nama: 'Es Teh Manis', harga: 5000, kategori: 'F&B' },
+          { id: 'p-7', nama: 'Kopi Hitam / Tubruk', harga: 6000, kategori: 'F&B' },
+          { id: 'p-8', nama: 'Mie Goreng + Telur', harga: 12000, kategori: 'F&B' }
+        ],
+
+        // Members Data
+        members: JSON.parse(localStorage.getItem('kb_members')) || [
+          { id: 'MBR-001', nama: 'Pak Joko', hp: '08123456789', saldo: 250000 },
+          { id: 'MBR-002', nama: 'Haji Endang', hp: '08567891234', saldo: 500000 }
+        ],
+        searchMemberQuery: '',
+        showAddMemberModal: false,
+        newMember: { nama: '', hp: '', saldo: 0 },
+        showTopUpModal: false,
+        selectedTopUpMember: null,
+        inputNominalTopUp: null,
+
+        // Cart & Checkout
+        cart: {
+          memberId: null,
+          items: []
+        },
+        showCheckoutModal: false,
+        checkoutMetode: 'CASH',
+        lastTrx: null,
+
+        // Restock
+        showRestockModal: false,
+        restockData: { ikanId: 'ik-1', jumlahKg: null },
+
+        // Transaksi History
+        riwayatTransaksi: JSON.parse(localStorage.getItem('kb_trx')) || []
+      }
+    },
+    computed: {
+      filteredItems() {
+        return this.posItems.filter(i => i.kategori === this.selectedCategory);
+      },
+      filteredMembers() {
+        if (!this.searchMemberQuery) return this.members;
+        const q = this.searchMemberQuery.toLowerCase();
+        return this.members.filter(m => m.nama.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
+      },
+      selectedMember() {
+        return this.members.find(m => m.id === this.cart.memberId) || null;
+      },
+      cartTotal() {
+        return this.cart.items.reduce((sum, i) => sum + (i.harga * i.qty), 0);
+      },
+      totalOmzetHariIni() {
+        return this.riwayatTransaksi.reduce((sum, t) => sum + t.total, 0);
+      },
+      omzetByMethod() {
+        const res = { cash: 0, deposit: 0, qris: 0 };
+        this.riwayatTransaksi.forEach(t => {
+          if (t.metode === 'CASH') res.cash += t.total;
+          if (t.metode === 'DEPOSIT') res.deposit += t.total;
+          if (t.metode === 'QRIS') res.qris += t.total;
+        });
+        return res;
+      },
+      omzetPerKasir() {
+        const res = {};
+        this.riwayatTransaksi.forEach(t => {
+          res[t.kasir] = (res[t.kasir] || 0) + t.total;
+        });
+        return res;
+      }
+    },
+    watch: {
+      daftarIkan: {
+        handler(val) { localStorage.setItem('kb_ikan', JSON.stringify(val)); },
+        deep: true
+      },
+      members: {
+        handler(val) { localStorage.setItem('kb_members', JSON.stringify(val)); },
+        deep: true
+      },
+      riwayatTransaksi: {
+        handler(val) { localStorage.setItem('kb_trx', JSON.stringify(val)); },
+        deep: true
+      }
+    },
+    methods: {
+      formatNumber(val) {
+        return new Intl.NumberFormat('id-ID').format(val || 0);
+      },
+      selectIkan(ikan) {
+        this.selectedIkan = ikan;
+        this.inputBerat = null;
+      },
+      addIkanToCart() {
+        if (!this.selectedIkan || !this.inputBerat || this.inputBerat <= 0) return;
+        this.cart.items.push({
+          id: this.selectedIkan.id,
+          nama: `${this.selectedIkan.nama} (${this.inputBerat} Kg)`,
+          harga: this.selectedIkan.harga,
+          qty: this.inputBerat,
+          isIkan: true,
+          ikanId: this.selectedIkan.id,
+          beratKg: this.inputBerat
+        });
+        this.selectedIkan = null;
+        this.inputBerat = null;
+      },
+      addToCart(item) {
+        const exist = this.cart.items.find(i => i.id === item.id);
+        if (exist) {
+          exist.qty += 1;
+        } else {
+          this.cart.items.push({ ...item, qty: 1 });
+        }
+      },
+      removeFromCart(idx) {
+        this.cart.items.splice(idx, 1);
+      },
+      openCheckoutModal() {
+        this.checkoutMetode = 'CASH';
+        this.showCheckoutModal = true;
+      },
+      prosesSelesaiTransaksi() {
+        // Potong Saldo jika Deposit
+        if (this.checkoutMetode === 'DEPOSIT') {
+          if (this.selectedMember && this.selectedMember.saldo >= this.cartTotal) {
+            this.selectedMember.saldo -= this.cartTotal;
+          } else {
+            alert('Saldo Deposit tidak mencukupi');
+            return;
+          }
+        }
+
+        // Potong Stok Ikan di Kolam
+        this.cart.items.forEach(item => {
+          if (item.isIkan) {
+            const targetIkan = this.daftarIkan.find(i => i.id === item.ikanId);
+            if (targetIkan) {
+              targetIkan.stokKg = Math.max(0, +(targetIkan.stokKg - item.beratKg).toFixed(2));
+            }
+          }
+        });
+
+        // Buat Objek Transaksi
+        const trxData = {
+          id: 'TRX-' + Date.now().toString().slice(-6),
+          waktu: new Date().toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }),
+          kasir: this.currentKasir,
+          memberNama: this.selectedMember ? this.selectedMember.nama : 'Umum (Non-Member)',
+          items: [...this.cart.items],
+          total: this.cartTotal,
+          metode: this.checkoutMetode
+        };
+
+        this.riwayatTransaksi.unshift(trxData);
+        this.lastTrx = trxData;
+        this.showCheckoutModal = false;
+
+        // Reset Cart
+        this.cart.memberId = null;
+        this.cart.items = [];
+      },
+      openTopUpModal(member) {
+        this.selectedTopUpMember = member;
+        this.inputNominalTopUp = null;
+        this.showTopUpModal = true;
+      },
+      simpanTopUp() {
+        if (!this.inputNominalTopUp || this.inputNominalTopUp <= 0) return;
+        this.selectedTopUpMember.saldo += this.inputNominalTopUp;
+        this.showTopUpModal = false;
+        alert(`Berhasil Top-Up Rp ${this.formatNumber(this.inputNominalTopUp)} ke ${this.selectedTopUpMember.nama}`);
+      },
+      simpanMemberBaru() {
+        if (!this.newMember.nama) return;
+        const newId = 'MBR-' + Math.floor(100 + Math.random() * 900);
+        this.members.push({
+          id: newId,
+          nama: this.newMember.nama,
+          hp: this.newMember.hp || '-',
+          saldo: this.newMember.saldo || 0
+        });
+        this.newMember = { nama: '', hp: '', saldo: 0 };
+        this.showAddMemberModal = false;
+      },
+      simpanRestock() {
+        if (!this.restockData.jumlahKg || this.restockData.jumlahKg <= 0) return;
+        const target = this.daftarIkan.find(i => i.id === this.restockData.ikanId);
+        if (target) {
+          target.stokKg = +(target.stokKg + this.restockData.jumlahKg).toFixed(2);
+        }
+        this.showRestockModal = false;
+        this.restockData.jumlahKg = null;
+      },
+      editHargaIkan(ikan) {
+        const val = prompt(`Edit harga per kg untuk ${ikan.nama}:`, ikan.harga);
+        if (val && !isNaN(val)) {
+          ikan.harga = parseInt(val);
+        }
+      },
+      downloadStrukPDF() {
+        const element = document.getElementById('printable-receipt');
+        const opt = {
+          margin: 0.2,
+          filename: `Struk_${this.lastTrx.id}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2 },
+          jsPDF: { unit: 'in', format: 'a6', orientation: 'portrait' }
+        };
+        html2pdf().set(opt).from(element).save();
+      },
+      shareWhatsApp() {
+        let text = `*STRUK PEMANCINGAN KEBOENDALI*\n`;
+        text += `ID: ${this.lastTrx.id}\n`;
+        text += `Tgl: ${this.lastTrx.waktu}\n`;
+        text += `Pelanggan: ${this.lastTrx.memberNama}\n`;
+        text += `-----------------------------------\n`;
+        this.lastTrx.items.forEach(i => {
+          text += `${i.nama} x${i.qty} = Rp ${this.formatNumber(i.qty * i.harga)}\n`;
+        });
+        text += `-----------------------------------\n`;
+        text += `*TOTAL: Rp ${this.formatNumber(this.lastTrx.total)}*\n`;
+        text += `Pembayaran: ${this.lastTrx.metode}\n\n`;
+        text += `Terima kasih! Salam Strike 🎣`;
+
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+      }
+    }
+  }).mount('#app');
+</script>
+
+</body>
+</html>
